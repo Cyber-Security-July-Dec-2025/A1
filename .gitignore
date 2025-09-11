@@ -1,0 +1,51 @@
+# Dependency directories
+node_modules/
+client/node_modules/
+server/node_modules/
+
+# Build and production artifacts
+client/dist/
+client/build/
+server/dist/
+server/build/
+server/storage/
+build/
+dist/
+
+# Environment variables
+.env
+.env.*
+client/.env
+server/.env
+
+# Logs and debug results
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Miscellaneous
+.DS_Store
+*.tgz
+server/uploads
+
+# IDE & editor settings
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# OS and hidden files
+Thumbs.db
+Desktop.ini
+
+# Coverage reports
+coverage/
+client/coverage/
+server/coverage/
+
+# project specific
+secure-vault-db/

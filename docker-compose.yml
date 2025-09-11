@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  # Node.js Backend Server
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: secure-vault-server
+    user: "0:0"
+    ports:
+      - "5001:5000"
+    volumes:
+      - server_storage:/app/storage
+      - server_db:/app/secure-vault-db
+    environment:
+      - NODE_ENV=production
+    networks:
+      - secure-vault-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:5000/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # React Frontend Client
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: secure-vault-client
+    ports:
+      - "3000:80"
+    depends_on:
+      server:
+        condition: service_healthy
+    networks:
+      - secure-vault-network
+    restart: unless-stopped
+
+volumes:
+  server_storage:
+    driver: local
+  server_db:
+    driver: local
+
+networks:
+  secure-vault-network:
+    driver: bridge
