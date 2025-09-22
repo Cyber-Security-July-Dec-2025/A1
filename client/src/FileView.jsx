@@ -11,6 +11,8 @@ import {
   importRsaPrivateKeyFromHexPkcs8,
   rsaOaepEncrypt,
   rsaOaepDecrypt,
+  sha256,
+  concatUint8Arrays,
 } from './utils/crypto.js';
 import { API_URL } from './config/apiConfig.js';
 
@@ -188,10 +190,14 @@ function FileView({ user, privateKeyHex, setStatus }) {
     }
 
   const uploadToastId = `upload-${fileToUpload?.name || Date.now()}`;
-  toast.info('Encrypting file and metadata...', { autoClose: 4000, toastId: uploadToastId });
+  toast.info('Encrypting file and metadata...', { autoClose: 10000, toastId: uploadToastId });
     try {
       const publicKey = await importRsaPublicKeyFromHexSpki(user.publicKey);
       const fileBuffer = await fileToUpload.arrayBuffer();
+
+      // calculate sha-256 hash of the file content
+      const hashBuffer = await sha256(fileBuffer);
+      toast.info('File hash calculated.', { autoClose: 2000, toastId: uploadToastId });
 
       const aesKey = await generateAesGcmKey();
 
@@ -203,9 +209,10 @@ function FileView({ user, privateKeyHex, setStatus }) {
       fullEncryptedMetadata.set(metadataIv, 0);
       fullEncryptedMetadata.set(new Uint8Array(encryptedMetadataBytes), metadataIv.length);
 
-      // 2. Encrypt file content with its own IV
+      // 2. Encrypt file content AND hash with its own IV
       const fileIv = getRandomIv();
-      const encryptedFileContent = await aesGcmEncrypt(aesKey, fileBuffer, fileIv);
+      const contentToEncrypt = concatUint8Arrays([new Uint8Array(fileBuffer), new Uint8Array(hashBuffer)]);
+      const encryptedFileContent = await aesGcmEncrypt(aesKey, contentToEncrypt, fileIv);
       const payload = new Uint8Array(fileIv.length + encryptedFileContent.byteLength);
       payload.set(fileIv, 0);
       payload.set(new Uint8Array(encryptedFileContent), fileIv.length);
@@ -216,10 +223,8 @@ function FileView({ user, privateKeyHex, setStatus }) {
 
       const encryptedKeyHex = arrayBufferToHex(encryptedAesKey);
       const encryptedMetadataHex = arrayBufferToHex(fullEncryptedMetadata);
-      console.log('Sending X-Encrypted-Key:', encryptedKeyHex);
-      console.log('Sending X-Encrypted-Metadata:', encryptedMetadataHex);
 
-  toast.info('Uploading file...', { autoClose: 5000, toastId: uploadToastId });
+      toast.info('Uploading file...', { autoClose: 5000, toastId: uploadToastId });
       const res = await fetch(`${API_URL}/file/${user.userId}`, {
         method: 'POST',
         headers: {
@@ -248,8 +253,8 @@ function FileView({ user, privateKeyHex, setStatus }) {
         
         throw new Error(errorMessage);
       }
-  toast.dismiss(uploadToastId);
-  toast.success('File uploaded successfully.', { autoClose: 3000 });
+      toast.dismiss(uploadToastId);
+      toast.success('File uploaded successfully.', { autoClose: 3000 });
       fetchFiles();
     } catch (err) {
       toast.error(`Error: ${err.message}`);
@@ -258,8 +263,8 @@ function FileView({ user, privateKeyHex, setStatus }) {
 
   const handleDownloadAndDecrypt = async (file) => {
     if (file.filename === '[Decryption Error]') return alert('Cannot download file with decryption error.');
-  const downloadToastId = `download-${file.fileId}`;
-  toast.info(`Downloading ${file.filename}...`, { autoClose: 4000, toastId: downloadToastId });
+    const downloadToastId = `download-${file.fileId}`;
+    toast.info(`Downloading ${file.filename}...`, { autoClose: 8000, toastId: downloadToastId });
     try {
       const res = await fetch(`${API_URL}/file/${file.fileId}`);
       if (!res.ok) throw new Error('Download failed');
@@ -272,16 +277,34 @@ function FileView({ user, privateKeyHex, setStatus }) {
       const fileIv = encFileBuffer.slice(0, 12);
       const ciphertext = encFileBuffer.slice(12);
 
-  toast.info(`Decrypting ${file.filename}...`, { autoClose: 4000, toastId: downloadToastId });
-      const decryptedFileBytes = await aesGcmDecrypt(aesKey, ciphertext, fileIv);
+      toast.info(`Decrypting ${file.filename}...`, { autoClose: 4000, toastId: downloadToastId });
+      const decryptedPayload = await aesGcmDecrypt(aesKey, ciphertext, fileIv);
+
+      // verify hash
+      const decryptedFileBytes = decryptedPayload.slice(0, -32);
+      const originalHashBytes = decryptedPayload.slice(-32);
+      
+      toast.info('Verifying file integrity...', { autoClose: 3000, toastId: downloadToastId });
+      const newHashBytes = await sha256(decryptedFileBytes);
+
+      const originalHashHex = arrayBufferToHex(originalHashBytes);
+      const newHashHex = arrayBufferToHex(newHashBytes);
+
+      if (originalHashHex !== newHashHex) {
+        toast.dismiss(downloadToastId);
+        toast.error('File integrity check failed! The file may be corrupted or tampered with.', { autoClose: 10000 });
+        return;
+      }
+      
+      toast.success('File integrity verified.', { autoClose: 2000 });
 
       const blob = new Blob([decryptedFileBytes], { type: file.type || 'application/octet-stream' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       a.download = file.filename;
       a.click();
-  toast.dismiss(downloadToastId);
-  toast.success(`${file.filename} downloaded and decrypted.`, { autoClose: 3500 });
+      toast.dismiss(downloadToastId);
+      toast.success(`${file.filename} downloaded and decrypted.`, { autoClose: 3500 });
     } catch (err) {
       toast.error(`Error: ${err.message}`);
     }
